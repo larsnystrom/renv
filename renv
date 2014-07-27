@@ -85,14 +85,36 @@ case $PARAMS[0] in
             exit 1
         fi
 
-        ENV=`ssh $REMOTE_HOST cat "$ENV_FILE" | grep "${PARAMS[1]}="`
-        while read -r line; do
-            if [ -n "$line" ]; then
-                KEY=`expr "$line" : "^\<export\> \([^=]*\)=.*"`
-                VAL=`expr "$line" : "^\<export\> [^=]*=\(.*\)"`
-                echo "${VAL}"
-            fi
-        done <<< "$ENV"
+        ENV=`ssh $REMOTE_HOST cat "$ENV_FILE" | grep "^\<export\> ${PARAMS[1]}="`
+
+        KEY=`expr "$ENV" : "^\<export\> \([^=]*\)=.*"`
+        VAL=`expr "$ENV" : "^\<export\> [^=]*=\(.*\)"`
+        echo "${VAL}"
+        ;;
+    config:set*)
+        if [ "$PARAMS_COUNT" != 2 ]; then
+            echo "No variable specified."
+            exit 1
+        fi
+
+        KEY=`expr "${PARAMS[1]}" : "\([^=]*\)=.*"`
+        NEW_VAL=`expr "${PARAMS[1]}" : "[^=]*=\(.*\)"`
+
+        ENV=`ssh $REMOTE_HOST cat "$ENV_FILE" | grep "^\<export\> ${KEY}="`
+        VAL=`expr "$ENV" : "^\<export\> [^=]*=\(.*\)"`
+
+        if [ "$VAL" == "$NEW_VAL" ]; then
+            echo $VAL
+            echo $NEW_VAL
+            echo "No change."
+            exit 0
+        fi
+
+        if [ -n "$ENV" ]; then
+            ssh $REMOTE_HOST "sed -i3 \"s|export ${KEY}=${VAL}|export ${KEY}=${NEW_VAL}|\" \"$ENV_FILE\""
+        else
+            echo "export ${KEY}=${NEW_VAL}" | ssh $REMOTE_HOST "cat >> $ENV_FILE"
+        fi
         ;;
     config*)
         ENV=`ssh $REMOTE_HOST cat "$ENV_FILE"`
