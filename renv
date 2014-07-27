@@ -85,11 +85,11 @@ case $PARAMS[0] in
             exit 1
         fi
 
-        ENV=`ssh $REMOTE_HOST cat "$ENV_FILE" | grep "^\<export\> ${PARAMS[1]}="`
-
-        KEY=`expr "$ENV" : "^\<export\> \([^=]*\)=.*"`
+        KEY="${PARAMS[1]}"
+        ENV=`ssh $REMOTE_HOST cat "$ENV_FILE" | grep "^\<export\> ${KEY}="`
         VAL=`expr "$ENV" : "^\<export\> [^=]*=\(.*\)"`
-        echo "${VAL}"
+
+        echo "$VAL"
         ;;
     config:set*)
         if [ "$PARAMS_COUNT" != 2 ]; then
@@ -104,17 +104,40 @@ case $PARAMS[0] in
         VAL=`expr "$ENV" : "^\<export\> [^=]*=\(.*\)"`
 
         if [ "$VAL" == "$NEW_VAL" ]; then
-            echo $VAL
-            echo $NEW_VAL
-            echo "No change."
+            echo "${KEY}=${NEW_VAL}"
             exit 0
         fi
 
         if [ -n "$ENV" ]; then
-            ssh $REMOTE_HOST "sed -i3 \"s|export ${KEY}=${VAL}|export ${KEY}=${NEW_VAL}|\" \"$ENV_FILE\""
+            ssh $REMOTE_HOST "sed -i \"s|export ${KEY}=${VAL}|export ${KEY}=${NEW_VAL}|\" \"$ENV_FILE\""
         else
             echo "export ${KEY}=${NEW_VAL}" | ssh $REMOTE_HOST "cat >> $ENV_FILE"
         fi
+
+        echo "${KEY}=${NEW_VAL}"
+        ;;
+    config:unset*)
+        if [ "$PARAMS_COUNT" != 2 ]; then
+            echo "No variable specified."
+            exit 1
+        fi
+
+        KEY="${PARAMS[1]}"
+
+        read -p "Do you wish to unset \"$KEY\"? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Aborting"
+            exit 0
+        fi
+
+        ENV=`ssh $REMOTE_HOST cat "$ENV_FILE" | grep "^\<export\> ${KEY}="`
+
+        if [ -z "$ENV" ]; then
+            exit 0
+        fi
+
+        ssh $REMOTE_HOST "sed -i \"/$KEY/d\" $ENV_FILE"
         ;;
     config*)
         ENV=`ssh $REMOTE_HOST cat "$ENV_FILE"`
