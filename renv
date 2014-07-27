@@ -141,13 +141,34 @@ case $PARAMS[0] in
         ;;
     config*)
         ENV=`ssh $REMOTE_HOST cat "$ENV_FILE"`
+        KEYS=()
+        VALS=()
+        MAX_LEN=0
         while read -r line; do
             if [ -n "$line" ]; then
-                KEY=`expr "$line" : "^\<export\> \([^=]*\)=.*"`
-                VAL=`expr "$line" : "^\<export\> [^=]*=\(.*\)"`
-                echo "${KEY}=${VAL}"
+                KEYS+=(`expr "$line" : "^\<export\> \([^=]*\)=.*"`)
+                VALS+=(`expr "$line" : "^\<export\> [^=]*=\(.*\)"`)
+            fi
+
+            # Get the length of the last string.
+            # [Get the string length at (length of array - 1)]
+            LENGTH_LAST=${#KEYS[${#KEYS[@]} - 1]}
+            if [ "$LENGTH_LAST" -gt "$MAX_LEN" ]; then
+                MAX_LEN=${LENGTH_LAST}
             fi
         done <<< "$ENV"
+
+        echo "=== $REMOTE Config Vars"
+        for i in "${!KEYS[@]}"; do
+            KEY=${KEYS[${i}]}
+            LEN=${#KEY}
+
+            echo -n "${KEY}:"
+            for k in $(seq $LEN $MAX_LEN); do
+                echo -n " "
+            done
+            echo ${VALS[${i}]}
+        done
         ;;
     *)
         echo "Invalid command \"${PARAMS[0]}\""
