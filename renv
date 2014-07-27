@@ -6,13 +6,31 @@ declare -r TAB=$'\t'
 declare -r EOL=$'\n'
 declare -r USAGE="Usage: `basename $0` config[:get|:set|:unset] [--host ssh_host|--remote git_remote] [--env-file path]"
 
-# Usage
-[ $# -eq 0 ] && { echo "$USAGE"; exit 1; }
+function ssh_get_line {
+    local __return=$1
+    local line=`ssh $HOST cat "$ENV_FILE" | grep "^\<export\> ${KEY}="`
+    eval $__return="'$line'"
+}
+
+function ssh_get_val {
+    local __return=$2
+    local val=`expr "$1" : "^\<export\> [^=]*=\(.*\)"`
+    eval $__return="'$val'"
+}
+
+function confirm {
+    read -p "${1} (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Aborting"
+        exit 0
+    fi
+}
 
 # Defaults
 REMOTE=
 ENV_FILE=""
-PARAMS_COUNT=0
+PARAMS=()
 HOST=
 
 # Arguments
@@ -34,22 +52,18 @@ while [[ $# > 1 ]]; do
             shift
             ;;
         *)
-            PARAMS[$PARAMS_COUNT]="$key"
-            PARAMS_COUNT=$((PARAMS_COUNT+1))
+            PARAMS+=("$key")
             ;;
     esac
 done
 
-if [ -n "$1" ]; then
-    PARAMS[$PARAMS_COUNT]="$1"
-    PARAMS_COUNT=$((PARAMS_COUNT+1))
-fi
+# Trailing param
+[ -n "$1" ] && { PARAMS+=("$1"); }
 
-if [ $PARAMS_COUNT == 0 ]; then
-    echo "$USAGE"
-    exit 1
-fi
+# Naive usage check
+[ ${#PARAMS[@]} -eq 0 ] && { echo "$USAGE"; exit 1; }
 
+# Try git remote if no host is specified
 if [ -z "$HOST" ] && [ -n "$REMOTE" ]; then
     # Require git
     if ! hash git > /dev/null 2>&1; then
@@ -86,83 +100,62 @@ if [ -z "$HOST" ] && [ -n "$REMOTE" ]; then
 fi
 
 # Last check
-if [ -z "$HOST" ]; then
-    echo "No host or remote specified."
-    exit 1
-fi
-if [ -z "$ENV_FILE" ]; then
-    echo "No remote .env file specified."
-    exit 1
-fi
+[ -z "$HOST" ] && { echo "No host or remote specified."; exit 1; }
+[ -z "$ENV_FILE" ] && { echo "No remote .env file specified."; exit 1; }
 
 APP=`expr "$HOST" : '.*@\([^:/]*\)'`
 
 # Check if file exists on remote
 if ! ssh $HOST stat $ENV_FILE \> /dev/null 2\>\&1; then
-    echo "\"$ENV_FILE\" doesn't exist on the remote. Try specifying the path with the --env-file argument."
+    echo "\"$ENV_FILE\" doesn't exist on the remote. Try specifying path with the --env-file argument."
     exit 1
 fi
 
 case $PARAMS[0] in
     config:get*)
-        if [ "$PARAMS_COUNT" != 2 ]; then
-            echo "No variable specified."
-            exit 1
-        fi
+        [ "${#PARAMS[@]}" != 2 ] && { echo "No key specified."; exit 1; }
 
         KEY="${PARAMS[1]}"
-        ENV=`ssh $HOST cat "$ENV_FILE" | grep "^\<export\> ${KEY}="`
-        VAL=`expr "$ENV" : "^\<export\> [^=]*=\(.*\)"`
+        ssh_get_line LINE
+        ssh_get_val "$LINE" VAL
 
         echo "$VAL"
+        exit 0
         ;;
     config:set*)
-        if [ "$PARAMS_COUNT" != 2 ]; then
-            echo "No variable specified."
-            exit 1
-        fi
+        [ "${#PARAMS[@]}" != 2 ] && { echo "No key specified."; exit 1; }
 
         KEY=`expr "${PARAMS[1]}" : "\([^=]*\)=.*"`
         NEW_VAL=`expr "${PARAMS[1]}" : "[^=]*=\(.*\)"`
+        ssh_get_line LINE
+        ssh_get_val "$LINE" VAL
 
-        ENV=`ssh $HOST cat "$ENV_FILE" | grep "^\<export\> ${KEY}="`
-        VAL=`expr "$ENV" : "^\<export\> [^=]*=\(.*\)"`
-
-        if [ "$VAL" == "$NEW_VAL" ]; then
+        if [ "$VAL" = "$NEW_VAL" ]; then
             echo "${KEY}=${NEW_VAL}"
             exit 0
         fi
 
-        if [ -n "$ENV" ]; then
+        if [ -n "$LINE" ]; then
             ssh $HOST "sed -i \"s|export ${KEY}=${VAL}|export ${KEY}=${NEW_VAL}|\" \"$ENV_FILE\""
         else
-            echo "export ${KEY}=${NEW_VAL}" | ssh $HOST "cat >> $ENV_FILE"
+            echo "export ${KEY}=${NEW_VAL}" | ssh $HOST "cat >> \"$ENV_FILE\""
         fi
 
         echo "${KEY}=${NEW_VAL}"
+        exit 0
         ;;
     config:unset*)
-        if [ "$PARAMS_COUNT" != 2 ]; then
-            echo "No variable specified."
-            exit 1
-        fi
+        [ "${#PARAMS[@]}" != 2 ] && { echo "No key specified."; exit 1; }
 
         KEY="${PARAMS[1]}"
+        ssh_get_line LINE
 
-        read -p "Do you wish to unset \"$KEY\"? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Aborting"
-            exit 0
-        fi
+        [ -z "$LINE" ] && { echo "No such key."; exit 1; }
 
-        ENV=`ssh $HOST cat "$ENV_FILE" | grep "^\<export\> ${KEY}="`
-
-        if [ -z "$ENV" ]; then
-            exit 0
-        fi
+        confirm "Do you wish to unset \"$KEY\"?"
 
         ssh $HOST "sed -i \"/$KEY/d\" $ENV_FILE"
+        exit 0
         ;;
     config*)
         ENV=`ssh $HOST cat "$ENV_FILE"`
@@ -178,9 +171,8 @@ case $PARAMS[0] in
             # Get the length of the last string.
             # [Get the string length at (length of array - 1)]
             LENGTH_LAST=${#KEYS[${#KEYS[@]} - 1]}
-            if [ "$LENGTH_LAST" -gt "$MAX_LEN" ]; then
-                MAX_LEN=${LENGTH_LAST}
-            fi
+
+            [ "$LENGTH_LAST" -gt "$MAX_LEN" ] && { MAX_LEN=${LENGTH_LAST}; }
         done <<< "$ENV"
 
         echo "=== $APP Config Vars"
@@ -194,6 +186,7 @@ case $PARAMS[0] in
             done
             echo ${VALS[${i}]}
         done
+        exit 0
         ;;
     *)
         echo "Invalid command \"${PARAMS[0]}\""
