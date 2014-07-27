@@ -1,0 +1,111 @@
+#!/bin/bash
+# Remote Environment Management
+
+# Constants
+TAB=$'\t'
+USAGE="Usage: `basename $0` command [--remote git_remote] [--env-file path]"
+
+# Usage
+[ $# -eq 0 ] && { echo "$USAGE"; exit 1; }
+
+# Require git
+if ! hash git 2>&-; then
+    echo "Git must be installed."
+    exit 1
+fi
+
+# Check if inside a git repository
+git status >&-
+if [ $? == 128 ]; then
+    echo "Not a git repository or git error. Run \"git status\" for more information."
+    exit 1
+fi
+
+# Defaults
+REMOTE=origin
+ENV_FILE=""
+PARAMS_COUNT=0
+
+# Arguments
+while [[ $# > 1 ]]; do
+    key="$1"
+    shift
+
+    case $key in
+        -r|--remote)
+            REMOTE="$1"
+            shift
+            ;;
+        -e|--env-file)
+            ENV_FILE="$1"
+            shift
+            ;;
+        *)
+            PARAMS[$PARAMS_COUNT]="$key"
+            PARAMS_COUNT=$((PARAMS_COUNT+1))
+            ;;
+    esac
+done
+
+if [ -n "$1" ]; then
+    PARAMS[$PARAMS_COUNT]="$1"
+    PARAMS_COUNT=$((PARAMS_COUNT+1))
+fi
+
+if [ $PARAMS_COUNT == 0 ]; then
+    echo "$USAGE"
+    exit 1
+fi
+
+# Get git remote
+GIT_REMOTE=`git remote -v | grep "$REMOTE" | grep "fetch"`
+if [ -z "$GIT_REMOTE" ]; then
+    echo "\"$REMOTE\" is not a remote in this repository."
+    exit 1
+fi
+
+REMOTE_HOST=`expr "$GIT_REMOTE" : "^.*${TAB}\(.*\):.* "`
+REMOTE_DIR=`expr "$GIT_REMOTE" : "^.*${TAB}.*@.*:\(.*\) "`
+
+# If ENV_FILE isn't set, try remote .env file
+if [ -z "$ENV_FILE" ]; then
+    ENV_FILE="${REMOTE_DIR}/.env"
+fi
+
+# Check if file exists on remote
+if ! ssh $REMOTE_HOST stat $ENV_FILE \> /dev/null 2\>\&1; then
+    echo "\"$ENV_FILE\" doesn't exist on the remote. Try specifying the path with the --env-file argument."
+    exit 1
+fi
+
+case $PARAMS[0] in
+    config:get*)
+        if [ "$PARAMS_COUNT" != 2 ]; then
+            echo "No variable specified."
+            exit 1
+        fi
+
+        ENV=`ssh $REMOTE_HOST cat "$ENV_FILE" | grep "${PARAMS[1]}="`
+        while read -r line; do
+            if [ -n "$line" ]; then
+                KEY=`expr "$line" : "^\<export\> \([^=]*\)=.*"`
+                VAL=`expr "$line" : "^\<export\> [^=]*=\(.*\)"`
+                echo "${VAL}"
+            fi
+        done <<< "$ENV"
+        ;;
+    config*)
+        ENV=`ssh $REMOTE_HOST cat "$ENV_FILE"`
+        while read -r line; do
+            if [ -n "$line" ]; then
+                KEY=`expr "$line" : "^\<export\> \([^=]*\)=.*"`
+                VAL=`expr "$line" : "^\<export\> [^=]*=\(.*\)"`
+                echo "${KEY}=${VAL}"
+            fi
+        done <<< "$ENV"
+        ;;
+    *)
+        echo "Invalid command \"${PARAMS[0]}\""
+        exit 1
+        ;;
+esac
