@@ -1,5 +1,6 @@
 #!/bin/bash
 # Remote Environment Management
+# https://github.com/larsnystrom/renv
 
 # Constants
 declare -r TAB=$'\t'
