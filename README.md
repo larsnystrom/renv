@@ -36,6 +36,12 @@ If you are using `renv` inside a git repo, you can specify a remote instead of a
 
     renv config --remote production --env-file /var/www/app/.env
 
+If you use a remote to specify the host, you can optionally save the .env filepath with git config.
+
+    git config renv.production.envfile /var/www/app/.env
+    # Now we do not need to specify --env-file when working with the production remote.
+    renv config --remote production
+
 Issues
 ------
 

@@ -93,6 +93,11 @@ if [ -z "$HOST" ] && [ -n "$REMOTE" ]; then
     HOST=`expr "$GIT_REMOTE" : "^.*${TAB}\(.*\):.* "`
     REMOTE_DIR=`expr "$GIT_REMOTE" : "^.*${TAB}.*@.*:\(.*\) "`
 
+    # If ENV_FILE isn't set, try to get it from git config
+    if [ -z "$ENV_FILE" ]; then
+        ENV_FILE=`git config --get renv.${REMOTE}.envfile`
+    fi
+
     # If ENV_FILE isn't set, try remote .env file
     if [ -z "$ENV_FILE" ]; then
         ENV_FILE="${REMOTE_DIR}/.env"
